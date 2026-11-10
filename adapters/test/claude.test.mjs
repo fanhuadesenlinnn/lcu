@@ -50,7 +50,7 @@ async function waitFor(predicate, timeoutMs = 5_000) {
   assert.fail(`Condition did not become true within ${timeoutMs} ms`);
 }
 
-async function connectRelay({ throughCurrentSymlink = false, crossTurn, maxEndedTurns, failLifecycle = false, noPowerShell = false, slowAcl = false, acl, lifecycleWaitMs, lifecycleStartupBudgetMs, startupDelayMs, jsOneOf = false, beforeConnect } = {}) {
+async function connectRelay({ throughCurrentSymlink = false, crossTurn, maxEndedTurns, failLifecycle = false, noPowerShell = false, slowAcl = false, acl, lifecycleWaitMs, lifecycleStartupBudgetMs, startupDelayMs, jsOneOf = false, jsAllOf = false, beforeConnect } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'lcu-claude-relay-test-'));
   if (failLifecycle) {
     const { registryDirectory } = await import('../../lcu/claude_lifecycle.mjs');
@@ -76,6 +76,7 @@ async function connectRelay({ throughCurrentSymlink = false, crossTurn, maxEnded
     ...(acl ? { LCU_TEST_ACL: acl } : {}),
     ...(startupDelayMs === undefined ? {} : { LCU_FIXTURE_STARTUP_DELAY_MS: String(startupDelayMs) }),
     ...(jsOneOf ? { LCU_FIXTURE_JS_ONE_OF: '1' } : {}),
+    ...(jsAllOf ? { LCU_FIXTURE_JS_ALL_OF: '1' } : {}),
     ...(lifecycleWaitMs === undefined ? {} : { LCU_TEST_LIFECYCLE_WAIT_MS: String(lifecycleWaitMs) }),
     ...(lifecycleStartupBudgetMs === undefined ? {} : { LCU_TEST_LIFECYCLE_STARTUP_BUDGET_MS: String(lifecycleStartupBudgetMs) }),
   };
@@ -283,6 +284,33 @@ test('Claude relay lists a js schema with a top-level oneOf as one object and fo
       { code: 'one-of-smoke', title: 'Checking the fixture' },
       { completion_summary: 'Checked the fixture' },
     ]);
+    const schemaEvents = bridge.diagnostics().filter(entry => entry.event.startsWith('tool_schema_'));
+    assert.deepEqual(schemaEvents.map(({ event, tool, merged }) => ({ event, tool, merged })),
+      [{ event: 'tool_schema_adapted', tool: 'js', merged: ['oneOf'] }]);
+  } finally {
+    await bridge.close();
+  }
+});
+
+test('Claude relay logs a public tool schema left with a top-level allOf and lists it unchanged', async () => {
+  const bridge = await connectRelay({ jsAllOf: true });
+  try {
+    const tools = (await bridge.client.listTools()).tools;
+    assert.deepEqual(tools.find(tool => tool.name === 'js').inputSchema,
+      { type: 'object', allOf: [{ type: 'object', properties: { code: { type: 'string' } }, required: ['code'] }] });
+    const schemaEvents = bridge.diagnostics().filter(entry => entry.event.startsWith('tool_schema_'));
+    assert.deepEqual(schemaEvents.map(({ event, tool, combinators }) => ({ event, tool, combinators })),
+      [{ event: 'tool_schema_unsupported', tool: 'js', combinators: ['allOf'] }]);
+  } finally {
+    await bridge.close();
+  }
+});
+
+test('Claude relay logs no schema events for plain public tool schemas', async () => {
+  const bridge = await connectRelay();
+  try {
+    await bridge.client.listTools();
+    assert.equal(bridge.diagnostics().some(entry => entry.event.startsWith('tool_schema_')), false);
   } finally {
     await bridge.close();
   }

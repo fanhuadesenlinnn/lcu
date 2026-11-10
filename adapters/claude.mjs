@@ -109,6 +109,23 @@ function asError(error) {
 }
 
 const TOP_LEVEL_COMBINATORS = ['oneOf', 'anyOf'];
+// The Claude API refuses a tool whose input schema has any of these at the top level.
+const API_REJECTED_COMBINATORS = ['oneOf', 'anyOf', 'allOf'];
+
+/**
+ * Record, as metadata only, each public tool whose schema `claudeToolDescriptor` adapted
+ * (`tool_schema_adapted`), and each listed schema that still has a top-level combinator a host would drop
+ * (`tool_schema_unsupported`). The listed descriptors are not changed.
+ */
+function logPublicSchemas(log, upstreamTools, listedTools) {
+  for (const tool of listedTools) {
+    const original = upstreamTools.find(candidate => candidate.name === tool.name)?.inputSchema;
+    const merged = TOP_LEVEL_COMBINATORS.filter(key => Array.isArray(original?.[key]));
+    if (merged.length > 0) log.event('tool_schema_adapted', { tool: tool.name, merged });
+    const left = API_REJECTED_COMBINATORS.filter(key => tool.inputSchema?.[key] !== undefined);
+    if (left.length > 0) log.event('tool_schema_unsupported', { tool: tool.name, combinators: left });
+  }
+}
 
 /**
  * The descriptor Claude gets for an original public tool. Claude Code leaves out an MCP tool whose input
@@ -443,6 +460,7 @@ export async function runClaudeBridge({
     try {
       const upstreamTools = (await client.listTools({}, { signal: lifecycleAbort.signal })).tools;
       const tools = upstreamTools.filter(tool => PUBLIC_TOOLS.has(tool.name)).map(claudeToolDescriptor);
+      logPublicSchemas(log, upstreamTools, tools);
       if (tools.length !== PUBLIC_TOOLS.size ||
           !upstreamTools.some(tool => tool.name === TURN_END_TOOL)) {
         throw new Error('Original CUA js/js_reset and turn_ended tools are required');

@@ -23,6 +23,8 @@ const jsInputSchema = process.env.LCU_FIXTURE_JS_ONE_OF ? {
     { type: 'object', properties: CODE_FORM, required: ['code'], additionalProperties: false },
     { type: 'object', properties: SUMMARY_FORM, required: ['completion_summary'], additionalProperties: false },
   ],
+} : process.env.LCU_FIXTURE_JS_ALL_OF ? {
+  type: 'object', allOf: [{ type: 'object', properties: { code: { type: 'string' } }, required: ['code'] }],
 } : { type: 'object', properties: { code: { type: 'string' } }, required: ['code'], additionalProperties: false };
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
   { name: 'js', description: 'Original JavaScript tool description.', inputSchema: jsInputSchema },
